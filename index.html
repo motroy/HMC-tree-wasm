@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Tree Pipeline WebApp</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: inline-block; width: 180px; }
+        #svg-container { margin-top: 20px; border: 1px solid #ccc; padding: 10px; overflow: auto; min-height: 200px; }
+        #status { font-weight: bold; margin-bottom: 20px; padding: 10px; background: #eee; border-radius: 4px; }
+        .section-title { font-weight: bold; margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
+        .optional { color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Tree Pipeline</h1>
+    <div id="status">Loading Pyodide and packages...</div>
+    
+    <div class="section-title">Inputs</div>
+    <div class="form-group">
+        <label>Newick File (*):</label>
+        <input type="file" id="newick_file" accept=".nwk,.tre">
+    </div>
+    <div class="form-group">
+        <label>Clone Map (CSV/TSV):</label>
+        <input type="file" id="clone_map" accept=".csv,.tsv">
+    </div>
+    <div class="form-group">
+        <label>Color Map:</label>
+        <input type="file" id="color_map" accept=".txt,.csv,.tsv">
+    </div>
+    <div class="form-group">
+        <label>cgMLST File:</label>
+        <input type="file" id="cgmlst_file" accept=".tsv,.csv">
+    </div>
+    <div class="form-group">
+        <label>Batches File:</label>
+        <input type="file" id="batches_file" accept=".tsv,.csv">
+    </div>
+
+    <div class="section-title">Layout Options (Optional)</div>
+    <div class="form-group">
+        <label>Width:</label>
+        <input type="number" id="width" placeholder="e.g. 1400">
+    </div>
+    <div class="form-group">
+        <label>Height:</label>
+        <input type="number" id="height" placeholder="e.g. 1200">
+    </div>
+    <div class="form-group">
+        <label>Legend X:</label>
+        <input type="number" id="legend_x" placeholder="e.g. 950">
+    </div>
+    <div class="form-group">
+        <label>Legend Y:</label>
+        <input type="number" id="legend_y" placeholder="e.g. 120">
+    </div>
+    <div class="form-group">
+        <label>Remove Samples Text:</label>
+        <input type="checkbox" id="remove_samples_text">
+    </div>
+
+    <div class="form-group" style="margin-top: 20px;">
+        <button id="run_btn" disabled style="padding: 10px 20px; font-size: 1.1em; cursor: pointer;">Run Pipeline</button>
+    </div>
+    
+    <div id="svg-container">
+        <i>Output will appear here.</i>
+    </div>
+
+    <script>
+        let pyodide;
+
+        async function init() {
+            try {
+                pyodide = await loadPyodide();
+                document.getElementById("status").innerText = "Loading Python packages...";
+                await pyodide.loadPackage(["pandas", "matplotlib"]);
+                
+                document.getElementById("status").innerText = "Downloading scripts...";
+                const filesToLoad = [
+                    'tree_pipeline.py',
+                    'newick_to_grapetree.py',
+                    'grapetree_auxiliary_functions_v7.py',
+                    'dan_auxiliary_functions.py',
+                    'defaults.csv'
+                ];
+                
+                for (const file of filesToLoad) {
+                    const response = await fetch(file);
+                    const content = await response.text();
+                    pyodide.FS.writeFile(file, content);
+                }
+                
+                document.getElementById("status").innerText = "Ready!";
+                document.getElementById("run_btn").disabled = false;
+            } catch (err) {
+                console.error(err);
+                document.getElementById("status").innerText = "Error initializing Pyodide: " + err.message;
+            }
+        }
+
+        async function readFile(fileInputElement) {
+            const file = fileInputElement.files[0];
+            if (!file) return null;
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.readAsText(file);
+            });
+        }
+
+        document.getElementById("run_btn").addEventListener("click", async () => {
+            document.getElementById("status").innerText = "Running... this may take a moment.";
+            document.getElementById("run_btn").disabled = true;
+            document.getElementById("svg-container").innerHTML = "<i>Running...</i>";
+            
+            try {
+                try {
+                    pyodide.FS.mkdir('/work');
+                } catch(e) {} // Ignore if exists
+
+                let args = ["tree_pipeline.py", "--output", "/work/annotated.svg", "--force"];
+
+                // Read files
+                const newickContent = await readFile(document.getElementById("newick_file"));
+                if (!newickContent) {
+                    alert("Newick file is required!");
+                    document.getElementById("status").innerText = "Ready!";
+                    document.getElementById("run_btn").disabled = false;
+                    document.getElementById("svg-container").innerHTML = "<i>Output will appear here.</i>";
+                    return;
+                }
+                pyodide.FS.writeFile('/work/input.nwk', newickContent);
+                args.push("--newick", "/work/input.nwk");
+
+                const cloneMapContent = await readFile(document.getElementById("clone_map"));
+                if (cloneMapContent) {
+                    pyodide.FS.writeFile('/work/clone_map.tsv', cloneMapContent);
+                    args.push("--clone_map", "/work/clone_map.tsv");
+                }
+
+                const colorMapContent = await readFile(document.getElementById("color_map"));
+                if (colorMapContent) {
+                    pyodide.FS.writeFile('/work/color_map.txt', colorMapContent);
+                    args.push("--color_map", "/work/color_map.txt");
+                }
+
+                const cgmlstContent = await readFile(document.getElementById("cgmlst_file"));
+                if (cgmlstContent) {
+                    pyodide.FS.writeFile('/work/cgmlst.tsv', cgmlstContent);
+                    args.push("--cgmlst", "/work/cgmlst.tsv");
+                }
+
+                const batchesContent = await readFile(document.getElementById("batches_file"));
+                if (batchesContent) {
+                    pyodide.FS.writeFile('/work/batches.tsv', batchesContent);
+                    args.push("--batches", "/work/batches.tsv");
+                }
+
+                // Layout options
+                const width = document.getElementById("width").value;
+                if (width) { args.push("--width", width); }
+                
+                const height = document.getElementById("height").value;
+                if (height) { args.push("--height", height); }
+                
+                const legendX = document.getElementById("legend_x").value;
+                if (legendX) { args.push("--legend_x", legendX); }
+                
+                const legendY = document.getElementById("legend_y").value;
+                if (legendY) { args.push("--legend_y", legendY); }
+                
+                if (document.getElementById("remove_samples_text").checked) {
+                    args.push("--remove_samples_text");
+                }
+
+                // Run python
+                pyodide.globals.set("sys_argv", args);
+                await pyodide.runPythonAsync(`
+                    import sys
+                    import tree_pipeline
+                    sys.argv = sys_argv.to_py()
+                    
+                    # Fix for python modules that might have state
+                    # We might want to reload or just run it.
+                    try:
+                        tree_pipeline.main()
+                    except SystemExit as e:
+                        if e.code != 0:
+                            raise Exception(f"SystemExit: {e.code}")
+                `);
+                
+                const svgContent = pyodide.FS.readFile('/work/annotated.svg', { encoding: 'utf8' });
+                document.getElementById("svg-container").innerHTML = "";
+                
+                const blob = new Blob([svgContent], {type: "image/svg+xml"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "annotated.svg";
+                a.innerText = "Download SVG";
+                a.style.display = "inline-block";
+                a.style.marginBottom = "10px";
+                a.style.padding = "5px 10px";
+                a.style.background = "#007bff";
+                a.style.color = "white";
+                a.style.textDecoration = "none";
+                a.style.borderRadius = "3px";
+                document.getElementById("svg-container").appendChild(a);
+                
+                const div = document.createElement("div");
+                div.innerHTML = svgContent;
+                document.getElementById("svg-container").appendChild(div);
+
+                document.getElementById("status").innerText = "Done!";
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById("status").innerText = "Error: " + err.message;
+                document.getElementById("svg-container").innerHTML = "<i style='color:red;'>Error occurred. Check console.</i>";
+            }
+
+            document.getElementById("run_btn").disabled = false;
+        });
+
+        init();
+    </script>
+</body>
+</html>

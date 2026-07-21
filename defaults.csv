@@ -1,0 +1,20 @@
+argument,value
+clone_map, clone_map.csv
+json, tree.json
+svg, tree.svg
+spacing_factor,20
+cgmlst,NA
+cgmlst_x,100
+cgmlst_y,50
+cgmlst_font_size,40
+sample_batch_map,NA
+remove_samples_text,0
+pattern_clone_legend_color_map,NA
+patterns_file,NA
+legend_table,NA
+legend_text,0
+svg_width,2500
+svg_height,1500
+legend_x,1100
+legend_y,100
+force,0
