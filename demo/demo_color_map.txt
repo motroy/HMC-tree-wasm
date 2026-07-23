@@ -1,0 +1,4 @@
+#e74c3c,CloneA
+#3498db,CloneB
+#2ecc71,CloneC
+#f39c12,CloneD
