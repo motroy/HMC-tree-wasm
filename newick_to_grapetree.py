@@ -249,8 +249,6 @@ def _contract_hypothetical_clusters(reps, members, collapsed_edges):
         changed = False
         for h in list(remaining_hypo):
             neighbours = list(adj[h].items())
-            if any(nb in remaining_hypo for nb, _ in neighbours):
-                continue  # wait until adjacent hypo nodes are resolved first
             # splice: connect every pair of real neighbours directly
             for i in range(len(neighbours)):
                 for j in range(i + 1, len(neighbours)):
@@ -270,7 +268,7 @@ def _contract_hypothetical_clusters(reps, members, collapsed_edges):
     new_members = {r: m for r, m in members.items() if r not in hypo_clusters}
     new_reps = {s: r for s, r in reps.items() if r not in hypo_clusters}
     seen = set()
-    new_edges = []
+    all_edges = []
     for a in adj:
         if a in hypo_clusters:
             continue
@@ -281,40 +279,137 @@ def _contract_hypothetical_clusters(reps, members, collapsed_edges):
             if key in seen:
                 continue
             seen.add(key)
-            new_edges.append((key[0], key[1], d))
+            all_edges.append((d, key[0], key[1]))
+
+    # Reduce to MST so spring_layout sees a sparse tree-topology graph
+    # rather than the dense transitive-closure produced by contraction.
+    all_edges.sort()
+    uf = {n: n for n in new_members}
+    def _find(x):
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+    new_edges = []
+    for d, a, b in all_edges:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            uf[rb] = ra
+            new_edges.append((a, b, d))
     return new_reps, new_members, new_edges
 
 
 # ------------------------------- Layout ------------------------------------ #
 
+def _tree_bfs_layout(rep_nodes, collapsed_edges, k):
+    '''
+    Radial BFS tree layout used as the initial positions for spring refinement.
+    Each node's depth in a BFS traversal determines its radius; angular wedges
+    are allocated proportionally to subtree size. This gives a topology-aware
+    starting point so force-directed iterations refine rather than reshape.
+    '''
+    from collections import deque, defaultdict as _dd
+
+    if len(rep_nodes) <= 1:
+        return {r: [0.0, 0.0] for r in rep_nodes}
+
+    adj = _dd(list)
+    for a, b, _d in collapsed_edges:
+        adj[a].append(b)
+        adj[b].append(a)
+
+    pos = {}
+    unvisited = set(rep_nodes)
+    x_off = 0.0  # horizontal offset between disconnected components
+
+    while unvisited:
+        root = next(iter(unvisited))
+        parent_of = {}
+        children_of = _dd(list)
+        order = [root]
+        comp = {root}
+        q = deque([root])
+        while q:
+            v = q.popleft()
+            for nb in adj[v]:
+                if nb not in comp:
+                    comp.add(nb)
+                    parent_of[nb] = v
+                    children_of[v].append(nb)
+                    order.append(nb)
+                    q.append(nb)
+        unvisited -= comp
+
+        # Subtree sizes for proportional wedge allocation
+        sz = {v: 1 for v in comp}
+        for v in reversed(order):
+            for ch in children_of[v]:
+                sz[v] += sz[ch]
+
+        # Assign angular wedges top-down, place nodes radially
+        wedge = {root: (0.0, 2 * math.pi)}
+        depth = {root: 0}
+        pos[root] = [x_off, 0.0]
+
+        for v in order[1:]:
+            par = parent_of[v]
+            depth[v] = depth[par] + 1
+            lo, hi = wedge[par]
+            total = sum(sz[c] for c in children_of[par])
+            cur = lo
+            for ch in children_of[par]:
+                span = (hi - lo) * sz[ch] / total
+                if ch == v:
+                    mid = cur + span / 2
+                    wedge[v] = (cur, cur + span)
+                    break
+                cur += span
+            r = k * depth[v]
+            pos[v] = [x_off + r * math.cos(mid), r * math.sin(mid)]
+
+        max_r = max(k * depth[v] for v in comp)
+        x_off += max_r * 2 + k * 3
+
+    return pos
+
+
 def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
     '''
-    Deterministic Fruchterman-Reingold-style layout. Edge lengths are biased by
-    genetic distance so longer branches push nodes further apart.
+    Fruchterman-Reingold layout seeded from a BFS radial tree layout so the
+    tree topology is already reflected in the starting positions. Attraction
+    forces are weighted by log(edge_distance+1) so longer branches produce
+    greater separation. Iterations are auto-capped for large trees to keep
+    O(n^2) repulsion time manageable.
     '''
     import random
     rng = random.Random(seed)
     n = len(rep_nodes)
-    idx = {r: i for i, r in enumerate(rep_nodes)}
-    # initial circle placement (deterministic)
-    pos = {}
-    for i, r in enumerate(rep_nodes):
-        ang = 2 * math.pi * i / max(1, n)
-        pos[r] = [math.cos(ang) * n * 5 + rng.uniform(-1, 1),
-                  math.sin(ang) * n * 5 + rng.uniform(-1, 1)]
+
+    area = (n * 80.0) ** 2
+    k = math.sqrt(area / max(1, n))
+
+    # Topology-aware initial layout; much better than a circle for large trees
+    pos = _tree_bfs_layout(rep_nodes, collapsed_edges, k)
+    # Tiny jitter to break exact symmetry
+    for r in rep_nodes:
+        pos[r][0] += rng.uniform(-k * 0.005, k * 0.005)
+        pos[r][1] += rng.uniform(-k * 0.005, k * 0.005)
 
     adj = defaultdict(list)
     for a, b, d in collapsed_edges:
         adj[a].append((b, d))
         adj[b].append((a, d))
 
-    area = (n * 80.0) ** 2
-    k = math.sqrt(area / max(1, n))
-    temp = n * 8.0
+    # Starting temperature: fraction of ideal separation so the BFS layout
+    # is refined rather than scrambled in the first few iterations.
+    temp = k * 0.2
+    # Cap iterations for large n to keep O(n^2) repulsion time manageable;
+    # the BFS start means fewer iterations are needed anyway.
+    effective_iter = min(iterations, max(200, iterations * 60 // max(60, n)))
 
-    for it in range(iterations):
+    for it in range(effective_iter):
         disp = {r: [0.0, 0.0] for r in rep_nodes}
-        # repulsion
+        # repulsion (all pairs)
         for i in range(n):
             ri = rep_nodes[i]
             for j in range(i + 1, n):
@@ -326,23 +421,23 @@ def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
                 ux, uy = dx / dist, dy / dist
                 disp[ri][0] += ux * force; disp[ri][1] += uy * force
                 disp[rj][0] -= ux * force; disp[rj][1] -= uy * force
-        # attraction along edges (ideal length scales with sqrt(distance+1))
+        # attraction along edges weighted by log(d+1)
         for a, b, d in collapsed_edges:
             dx = pos[a][0] - pos[b][0]
             dy = pos[a][1] - pos[b][1]
             dist = math.hypot(dx, dy) or 0.01
             ideal = k * (1 + math.log1p(d))
-            force = (dist * dist) / (k * ideal / k)  # ~ dist^2/k
-            force = dist * dist / k
+            force = dist * dist / ideal
             ux, uy = dx / dist, dy / dist
             disp[a][0] -= ux * force; disp[a][1] -= uy * force
             disp[b][0] += ux * force; disp[b][1] += uy * force
-        # limit and apply
+        # apply with temperature cap
         for r in rep_nodes:
             dl = math.hypot(*disp[r]) or 0.01
             pos[r][0] += disp[r][0] / dl * min(dl, temp)
             pos[r][1] += disp[r][1] / dl * min(dl, temp)
         temp *= 0.99
+
     return pos
 
 
