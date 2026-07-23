@@ -5,31 +5,76 @@
     <title>Tree Pipeline WebApp</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
         .form-group { margin-bottom: 15px; }
         label { display: inline-block; width: 180px; }
         #svg-container { margin-top: 20px; border: 1px solid #ccc; padding: 10px; overflow: auto; min-height: 200px; }
-        #status { font-weight: bold; margin-bottom: 20px; padding: 10px; background: #eee; border-radius: 4px; }
+        #status { font-weight: bold; margin-bottom: 10px; padding: 10px; background: #eee; border-radius: 4px; }
+        #status.ready { background: #dfd; color: #060; }
+        #status.error { background: #fdd; color: #c00; }
         .section-title { font-weight: bold; margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
         .optional { color: #666; font-size: 0.9em; }
+
+        /* ── Pipeline progress ──────────────────────────────────────────── */
+        #progress-section { display: none; margin: 8px 0 14px; }
+        .step-chips { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+        .step-chip {
+            padding: 3px 12px; border-radius: 12px; font-size: 0.78em; font-weight: 600;
+            background: #e0e0e0; color: #777; transition: background 0.3s, color 0.3s;
+        }
+        .step-chip.active { background: #007bff; color: #fff; animation: chip-pulse 1.2s infinite; }
+        .step-chip.done   { background: #28a745; color: #fff; animation: none; }
+        @keyframes chip-pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+        .progress-track { height: 7px; background: #ddd; border-radius: 4px; overflow: hidden; }
+        #progress-bar   { height: 100%; width: 0%; background: #007bff;
+                          border-radius: 4px; transition: width 0.4s ease; }
+        #log-line { font-size: 0.78em; color: #555; font-family: monospace;
+                    margin-top: 4px; min-height: 1.2em; }
+
+        /* ── Buttons ────────────────────────────────────────────────────── */
+        .btn { padding: 8px 18px; font-size: 1em; cursor: pointer;
+               border: none; border-radius: 4px; transition: opacity 0.2s; }
+        .btn:disabled { opacity: 0.5; cursor: default; }
+        .btn-primary { background: #007bff; color: #fff; }
+        .btn-primary:hover:not(:disabled) { background: #0069d9; }
+        .btn-demo    { background: #6c757d; color: #fff; margin-left: 8px; }
+        .btn-demo:hover:not(:disabled) { background: #5a6268; }
+
+        /* ── Demo loaded badge ──────────────────────────────────────────── */
+        .demo-tag { font-size: 0.75em; color: #28a745; margin-left: 6px;
+                    font-weight: 600; display: none; }
     </style>
 </head>
 <body>
     <h1>Tree Pipeline</h1>
-    <div id="status">Loading Pyodide and packages...</div>
-    
+    <div id="status">Loading Pyodide and packages…</div>
+
+    <!-- Pipeline progress (visible during run) -->
+    <div id="progress-section">
+        <div class="step-chips">
+            <div class="step-chip" id="chip-a">A: Build Tree</div>
+            <div class="step-chip" id="chip-b">B: Label Clones</div>
+            <div class="step-chip" id="chip-c">C: Annotate SVG</div>
+        </div>
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <div id="log-line"></div>
+    </div>
+
     <div class="section-title">Inputs</div>
     <div class="form-group">
         <label>Newick File (*):</label>
         <input type="file" id="newick_file" accept=".nwk,.tre">
+        <span class="demo-tag" id="tag-newick">✓ demo</span>
     </div>
     <div class="form-group">
         <label>Clone Map (CSV/TSV):</label>
         <input type="file" id="clone_map" accept=".csv,.tsv">
+        <span class="demo-tag" id="tag-clone">✓ demo</span>
     </div>
     <div class="form-group">
         <label>Color Map:</label>
         <input type="file" id="color_map" accept=".txt,.csv,.tsv">
+        <span class="demo-tag" id="tag-color">✓ demo</span>
     </div>
     <div class="form-group">
         <label>cgMLST File:</label>
@@ -40,22 +85,22 @@
         <input type="file" id="batches_file" accept=".tsv,.csv">
     </div>
 
-    <div class="section-title">Layout Options (Optional)</div>
+    <div class="section-title">Layout Options</div>
     <div class="form-group">
         <label>Width:</label>
-        <input type="number" id="width" placeholder="e.g. 1400">
+        <input type="number" id="width" value="2500" placeholder="e.g. 2500">
     </div>
     <div class="form-group">
         <label>Height:</label>
-        <input type="number" id="height" placeholder="e.g. 1200">
+        <input type="number" id="height" value="1500" placeholder="e.g. 1500">
     </div>
     <div class="form-group">
         <label>Legend X:</label>
-        <input type="number" id="legend_x" placeholder="e.g. 950">
+        <input type="number" id="legend_x" value="1100" placeholder="e.g. 1100">
     </div>
     <div class="form-group">
         <label>Legend Y:</label>
-        <input type="number" id="legend_y" placeholder="e.g. 120">
+        <input type="number" id="legend_y" value="100" placeholder="e.g. 100">
     </div>
     <div class="form-group">
         <label>Remove Samples Text:</label>
@@ -63,45 +108,109 @@
     </div>
 
     <div class="form-group" style="margin-top: 20px;">
-        <button id="run_btn" disabled style="padding: 10px 20px; font-size: 1.1em; cursor: pointer;">Run Pipeline</button>
+        <button id="run_btn"  class="btn btn-primary" disabled>Run Pipeline</button>
+        <button id="demo_btn" class="btn btn-demo"    disabled>Load Demo Data</button>
     </div>
-    
+
     <div id="svg-container">
         <i>Output will appear here.</i>
     </div>
 
     <script>
-        let pyodide;
-
-        async function init() {
-            try {
-                pyodide = await loadPyodide();
-                document.getElementById("status").innerText = "Loading Python packages...";
-                await pyodide.loadPackage(["pandas", "matplotlib"]);
-                
-                document.getElementById("status").innerText = "Downloading scripts...";
-                const filesToLoad = [
-                    'tree_pipeline.py',
-                    'newick_to_grapetree.py',
-                    'grapetree_auxiliary_functions_v7.py',
-                    'dan_auxiliary_functions.py',
-                    'defaults.csv'
-                ];
-                
-                for (const file of filesToLoad) {
-                    const response = await fetch(file);
-                    const content = await response.text();
-                    pyodide.FS.writeFile(file, content);
-                }
-                
-                document.getElementById("status").innerText = "Ready!";
-                document.getElementById("run_btn").disabled = false;
-            } catch (err) {
-                console.error(err);
-                document.getElementById("status").innerText = "Error initializing Pyodide: " + err.message;
-            }
+        // ── Status helper ─────────────────────────────────────────────────────
+        function setStatus(msg, cls) {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = cls || '';
         }
 
+        // ── Pipeline progress helpers ─────────────────────────────────────────
+        let _curChip = null;
+        let _barPct  = 0;
+
+        function _chipDone(id) {
+            const el = document.getElementById(id);
+            if (el) el.className = 'step-chip done';
+        }
+
+        function _chipActive(id) {
+            if (_curChip && _curChip !== id) _chipDone(_curChip);
+            _curChip = id;
+            const el = document.getElementById(id);
+            if (el) el.className = 'step-chip active';
+        }
+
+        function _setBar(pct) {
+            _barPct = pct;
+            document.getElementById('progress-bar').style.width = pct + '%';
+        }
+
+        function _resetProgress() {
+            _curChip = null; _barPct = 0;
+            ['chip-a', 'chip-b', 'chip-c'].forEach(id => {
+                document.getElementById(id).className = 'step-chip';
+            });
+            _setBar(0);
+            document.getElementById('log-line').textContent = '';
+            document.getElementById('progress-section').style.display = 'block';
+        }
+
+        function _finishProgress() {
+            if (_curChip) { _chipDone(_curChip); _curChip = null; }
+            _setBar(100);
+        }
+
+        // Called from Python stdout redirect
+        window.updatePipelineProgress = function(msg) {
+            document.getElementById('log-line').textContent = msg;
+            if      (msg.includes('Stage A'))       { _chipActive('chip-a'); _setBar(5);  }
+            else if (msg.includes('laid out'))      { _setBar(28); }
+            else if (msg.includes('Stage B'))       { _chipActive('chip-b'); _setBar(36); }
+            else if (msg.includes('Stage C'))       { _chipActive('chip-c'); _setBar(50); }
+            else if (msg.includes('multi-sample')   ||
+                     msg.includes('#loci')          || msg.includes('Loci')   ||
+                     msg.includes('lour')           || msg.includes('batch')  ||
+                     msg.includes('Batch')          || msg.includes('text label')) {
+                if (_barPct >= 50 && _barPct < 88) _setBar(_barPct + 8);
+            }
+            else if (msg.includes('Created'))       { _setBar(92); }
+            else if (msg.includes('Done.'))         { _finishProgress(); }
+        };
+
+        // ── Demo data loader ──────────────────────────────────────────────────
+        function _makeFile(content, name, type) {
+            const blob = new Blob([content], { type });
+            return new File([blob], name, { type });
+        }
+
+        function _setFileInput(inputId, file, tagId) {
+            const input = document.getElementById(inputId);
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            if (tagId) document.getElementById(tagId).style.display = 'inline';
+        }
+
+        async function loadDemo() {
+            document.getElementById('demo_btn').disabled = true;
+            setStatus('Loading demo data…');
+            try {
+                const [newick, cloneMap, colorMap] = await Promise.all([
+                    fetch('demo/demo.nwk').then(r => r.text()),
+                    fetch('demo/demo_clone_map.tsv').then(r => r.text()),
+                    fetch('demo/demo_color_map.txt').then(r => r.text()),
+                ]);
+                _setFileInput('newick_file', _makeFile(newick,    'demo.nwk',            'text/plain'),                   'tag-newick');
+                _setFileInput('clone_map',   _makeFile(cloneMap,  'demo_clone_map.tsv',   'text/tab-separated-values'),   'tag-clone');
+                _setFileInput('color_map',   _makeFile(colorMap,  'demo_color_map.txt',   'text/plain'),                  'tag-color');
+                setStatus('Demo data loaded — click Run Pipeline to generate the tree.', 'ready');
+            } catch (err) {
+                setStatus('Failed to load demo: ' + err.message, 'error');
+            }
+            document.getElementById('demo_btn').disabled = false;
+        }
+
+        // ── File reader helper ────────────────────────────────────────────────
         async function readFile(fileInputElement) {
             const file = fileInputElement.files[0];
             if (!file) return null;
@@ -112,119 +221,159 @@
             });
         }
 
-        document.getElementById("run_btn").addEventListener("click", async () => {
-            document.getElementById("status").innerText = "Running... this may take a moment.";
-            document.getElementById("run_btn").disabled = true;
-            document.getElementById("svg-container").innerHTML = "<i>Running...</i>";
-            
+        // ── Pyodide init ──────────────────────────────────────────────────────
+        let pyodide;
+
+        async function init() {
             try {
-                try {
-                    pyodide.FS.mkdir('/work');
-                } catch(e) {} // Ignore if exists
+                setStatus('Loading Pyodide runtime…');
+                pyodide = await loadPyodide();
+                setStatus('Loading Python packages (pandas, matplotlib)…');
+                await pyodide.loadPackage(['pandas', 'matplotlib']);
 
-                let args = ["tree_pipeline.py", "--output", "/work/annotated.svg", "--force"];
+                setStatus('Downloading pipeline scripts…');
+                const filesToLoad = [
+                    'tree_pipeline.py',
+                    'newick_to_grapetree.py',
+                    'grapetree_auxiliary_functions_v7.py',
+                    'dan_auxiliary_functions.py',
+                    'defaults.csv'
+                ];
+                for (const file of filesToLoad) {
+                    const response = await fetch(file);
+                    const content  = await response.text();
+                    pyodide.FS.writeFile(file, content);
+                }
 
-                // Read files
-                const newickContent = await readFile(document.getElementById("newick_file"));
+                setStatus('Ready!', 'ready');
+                document.getElementById('run_btn').disabled  = false;
+                document.getElementById('demo_btn').disabled = false;
+            } catch (err) {
+                console.error(err);
+                setStatus('Error initializing: ' + err.message, 'error');
+            }
+        }
+
+        // ── Run pipeline ──────────────────────────────────────────────────────
+        document.getElementById('run_btn').addEventListener('click', async () => {
+            setStatus('Running pipeline…');
+            document.getElementById('run_btn').disabled  = true;
+            document.getElementById('demo_btn').disabled = true;
+            document.getElementById('svg-container').innerHTML = '<i>Running…</i>';
+            _resetProgress();
+
+            try {
+                try { pyodide.FS.mkdir('/work'); } catch(e) {}
+
+                let args = ['tree_pipeline.py', '--output', '/work/annotated.svg', '--force'];
+
+                const newickContent = await readFile(document.getElementById('newick_file'));
                 if (!newickContent) {
-                    alert("Newick file is required!");
-                    document.getElementById("status").innerText = "Ready!";
-                    document.getElementById("run_btn").disabled = false;
-                    document.getElementById("svg-container").innerHTML = "<i>Output will appear here.</i>";
+                    alert('Newick file is required!');
+                    setStatus('Ready!', 'ready');
+                    document.getElementById('run_btn').disabled  = false;
+                    document.getElementById('demo_btn').disabled = false;
+                    document.getElementById('svg-container').innerHTML = '<i>Output will appear here.</i>';
+                    document.getElementById('progress-section').style.display = 'none';
                     return;
                 }
                 pyodide.FS.writeFile('/work/input.nwk', newickContent);
-                args.push("--newick", "/work/input.nwk");
+                args.push('--newick', '/work/input.nwk');
 
-                const cloneMapContent = await readFile(document.getElementById("clone_map"));
+                const cloneMapContent = await readFile(document.getElementById('clone_map'));
                 if (cloneMapContent) {
                     pyodide.FS.writeFile('/work/clone_map.tsv', cloneMapContent);
-                    args.push("--clone_map", "/work/clone_map.tsv");
+                    args.push('--clone_map', '/work/clone_map.tsv');
                 }
 
-                const colorMapContent = await readFile(document.getElementById("color_map"));
+                const colorMapContent = await readFile(document.getElementById('color_map'));
                 if (colorMapContent) {
                     pyodide.FS.writeFile('/work/color_map.txt', colorMapContent);
-                    args.push("--color_map", "/work/color_map.txt");
+                    args.push('--color_map', '/work/color_map.txt');
                 }
 
-                const cgmlstContent = await readFile(document.getElementById("cgmlst_file"));
+                const cgmlstContent = await readFile(document.getElementById('cgmlst_file'));
                 if (cgmlstContent) {
                     pyodide.FS.writeFile('/work/cgmlst.tsv', cgmlstContent);
-                    args.push("--cgmlst", "/work/cgmlst.tsv");
+                    args.push('--cgmlst', '/work/cgmlst.tsv');
                 }
 
-                const batchesContent = await readFile(document.getElementById("batches_file"));
+                const batchesContent = await readFile(document.getElementById('batches_file'));
                 if (batchesContent) {
                     pyodide.FS.writeFile('/work/batches.tsv', batchesContent);
-                    args.push("--batches", "/work/batches.tsv");
+                    args.push('--batches', '/work/batches.tsv');
                 }
 
-                // Layout options
-                const width = document.getElementById("width").value;
-                if (width) { args.push("--width", width); }
-                
-                const height = document.getElementById("height").value;
-                if (height) { args.push("--height", height); }
-                
-                const legendX = document.getElementById("legend_x").value;
-                if (legendX) { args.push("--legend_x", legendX); }
-                
-                const legendY = document.getElementById("legend_y").value;
-                if (legendY) { args.push("--legend_y", legendY); }
-                
-                if (document.getElementById("remove_samples_text").checked) {
-                    args.push("--remove_samples_text");
+                const width = document.getElementById('width').value;
+                if (width)   { args.push('--width',    width);   }
+                const height = document.getElementById('height').value;
+                if (height)  { args.push('--height',   height);  }
+                const legendX = document.getElementById('legend_x').value;
+                if (legendX) { args.push('--legend_x', legendX); }
+                const legendY = document.getElementById('legend_y').value;
+                if (legendY) { args.push('--legend_y', legendY); }
+                if (document.getElementById('remove_samples_text').checked) {
+                    args.push('--remove_samples_text');
                 }
 
-                // Run python
-                pyodide.globals.set("sys_argv", args);
+                // Capture Python stdout → progress UI
+                pyodide.globals.set('sys_argv', args);
                 await pyodide.runPythonAsync(`
-                    import sys
-                    import tree_pipeline
-                    sys.argv = sys_argv.to_py()
-                    
-                    # Fix for python modules that might have state
-                    # We might want to reload or just run it.
-                    try:
-                        tree_pipeline.main()
-                    except SystemExit as e:
-                        if e.code != 0:
-                            raise Exception(f"SystemExit: {e.code}")
-                `);
-                
-                const svgContent = pyodide.FS.readFile('/work/annotated.svg', { encoding: 'utf8' });
-                document.getElementById("svg-container").innerHTML = "";
-                
-                const blob = new Blob([svgContent], {type: "image/svg+xml"});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "annotated.svg";
-                a.innerText = "Download SVG";
-                a.style.display = "inline-block";
-                a.style.marginBottom = "10px";
-                a.style.padding = "5px 10px";
-                a.style.background = "#007bff";
-                a.style.color = "white";
-                a.style.textDecoration = "none";
-                a.style.borderRadius = "3px";
-                document.getElementById("svg-container").appendChild(a);
-                
-                const div = document.createElement("div");
-                div.innerHTML = svgContent;
-                document.getElementById("svg-container").appendChild(div);
+import sys
+import tree_pipeline
+from js import updatePipelineProgress
 
-                document.getElementById("status").innerText = "Done!";
+class _UIWriter:
+    def write(self, text):
+        for line in text.split('\\n'):
+            if line.strip():
+                updatePipelineProgress(line.strip())
+    def flush(self): pass
+
+_orig = sys.stdout
+sys.stdout = _UIWriter()
+try:
+    sys.argv = sys_argv.to_py()
+    tree_pipeline.main()
+except SystemExit as e:
+    if e.code != 0:
+        raise Exception(f"SystemExit: {e.code}")
+finally:
+    sys.stdout = _orig
+`);
+
+                const svgContent = pyodide.FS.readFile('/work/annotated.svg', { encoding: 'utf8' });
+                document.getElementById('svg-container').innerHTML = '';
+
+                const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url; a.download = 'annotated.svg'; a.textContent = 'Download SVG';
+                Object.assign(a.style, {
+                    display: 'inline-block', marginBottom: '10px', padding: '5px 12px',
+                    background: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '3px'
+                });
+                document.getElementById('svg-container').appendChild(a);
+
+                const div = document.createElement('div');
+                div.innerHTML = svgContent;
+                document.getElementById('svg-container').appendChild(div);
+
+                setStatus('Done!', 'ready');
 
             } catch (err) {
                 console.error(err);
-                document.getElementById("status").innerText = "Error: " + err.message;
-                document.getElementById("svg-container").innerHTML = "<i style='color:red;'>Error occurred. Check console.</i>";
+                setStatus('Error: ' + err.message, 'error');
+                document.getElementById('svg-container').innerHTML =
+                    '<i style="color:red;">Error occurred. Check the browser console for details.</i>';
+                document.getElementById('progress-section').style.display = 'none';
             }
 
-            document.getElementById("run_btn").disabled = false;
+            document.getElementById('run_btn').disabled  = false;
+            document.getElementById('demo_btn').disabled = false;
         });
+
+        document.getElementById('demo_btn').addEventListener('click', loadDemo);
 
         init();
     </script>
