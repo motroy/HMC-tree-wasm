@@ -346,17 +346,22 @@ def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
     return pos
 
 
-def normalize_positions(pos, margin=80, scale=90):
+def normalize_positions(pos, margin=80, target_span=1200):
     xs = [p[0] for p in pos.values()]
     ys = [p[1] for p in pos.values()]
     minx, miny = min(xs), min(ys)
+    spanx = max(xs) - minx or 1.0
+    spany = max(ys) - miny or 1.0
+    # Scale so the largest dimension equals target_span, keeping aspect ratio.
+    sc = target_span / max(spanx, spany)
     out = {}
     for r, p in pos.items():
-        out[r] = [(p[0] - minx) * 1.0 + margin, (p[1] - miny) * 1.0 + margin]
-    # rescale to a comfortable canvas
-    xs = [p[0] for p in out.values()]; ys = [p[1] for p in out.values()]
-    w = max(xs) - min(xs) + 2 * margin
-    h = max(ys) - min(ys) + 2 * margin
+        out[r] = [(p[0] - minx) * sc + margin,
+                  (p[1] - miny) * sc + margin]
+    xs2 = [p[0] for p in out.values()]
+    ys2 = [p[1] for p in out.values()]
+    w = max(xs2) - min(xs2) + 2 * margin
+    h = max(ys2) - min(ys2) + 2 * margin
     return out, w, h
 
 
