@@ -505,7 +505,8 @@ def circle_path(r):
     return f"M0,{r}A{r},{r} 0 1,1 0,-{r}A{r},{r} 0 1,1 0,{r}Z"
 
 
-def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h):
+def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h,
+              branch_font_size=26, node_font_size=12):
     rep_list = list(members.keys())
     parts = []
     parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -523,10 +524,10 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h):
                      f'stroke-dasharray="" stroke-width="3px" '
                      f'style="stroke: black; opacity: 1;"></line>')
         parts.append(f'<text class="distance-label" dy=".71em" '
-                     f'text-anchor="middle" font-size="26px" '
+                     f'text-anchor="middle" font-size="{branch_font_size}px" '
                      f'font-family="sans-serif" x="{mx}" y="{my}" '
-                     f'style="fill: rgb(102,102,102); stroke: white; '
-                     f'stroke-width: 5px; opacity: 0.9;">{int(d)}</text>')  # self-contained
+                     f'style="fill: black; stroke: white; '
+                     f'stroke-width: 5px; opacity: 0.9;">{int(d)}</text>')
         parts.append('</g>')
 
     # nodes
@@ -539,7 +540,7 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h):
                      f'fill="white" style="stroke: black;"></path>')
         # shown sample label (grapetree shows the representative sample only)
         parts.append(f'<text class="node-group-number" dy=".71em" '
-                     f'text-anchor="middle" font-size="12" '
+                     f'text-anchor="middle" font-size="{node_font_size}" '
                      f'font-family="sans-serif" '
                      f'transform="translate(0,-4)">{r}</text>')
         parts.append('</g>')
@@ -560,7 +561,8 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h):
 
 # ------------------------------- Driver ------------------------------------ #
 
-def generate(newick_file, out_json, out_svg, layout_iterations=600):
+def generate(newick_file, out_json, out_svg, layout_iterations=600,
+             branch_font_size=26, node_font_size=12):
     with open(newick_file) as f:
         newick_text = f.read()
     root = parse_newick(newick_text)
@@ -578,7 +580,9 @@ def generate(newick_file, out_json, out_svg, layout_iterations=600):
     with open(out_json, 'w') as f:
         json.dump(json_out, f)
 
-    svg = build_svg(reps, members, collapsed_edges, pos, w, h)
+    svg = build_svg(reps, members, collapsed_edges, pos, w, h,
+                    branch_font_size=branch_font_size,
+                    node_font_size=node_font_size)
     with open(out_svg, 'w') as f:
         f.write(svg)
     return out_json, out_svg, members
