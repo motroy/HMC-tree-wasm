@@ -8,7 +8,14 @@
         body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
         .form-group { margin-bottom: 15px; }
         label { display: inline-block; width: 180px; }
-        #svg-container { margin-top: 20px; border: 1px solid #ccc; padding: 10px; overflow: auto; min-height: 200px; }
+        #svg-container {
+            margin-top: 10px; border: 1px solid #ccc; padding: 0;
+            overflow: hidden; min-height: 200px; height: 70vh;
+            cursor: grab; user-select: none; position: relative;
+            background: #fafafa;
+        }
+        #svg-container.empty { display: flex; align-items: center; justify-content: center; cursor: default; }
+        #svg-wrapper { display: inline-block; transform-origin: 0 0; }
         #status { font-weight: bold; margin-bottom: 10px; padding: 10px; background: #eee; border-radius: 4px; }
         #status.ready { background: #dfd; color: #060; }
         #status.error { background: #fdd; color: #c00; }
@@ -39,10 +46,18 @@
         .btn-primary:hover:not(:disabled) { background: #0069d9; }
         .btn-demo    { background: #6c757d; color: #fff; margin-left: 8px; }
         .btn-demo:hover:not(:disabled) { background: #5a6268; }
+        .btn-sm { padding: 5px 12px; font-size: 0.85em; margin-left: 0; }
 
         /* ── Demo loaded badge ──────────────────────────────────────────── */
         .demo-tag { font-size: 0.75em; color: #28a745; margin-left: 6px;
                     font-weight: 600; display: none; }
+
+        /* ── Plot toolbar ───────────────────────────────────────────────── */
+        #plot-toolbar {
+            display: none; margin: 10px 0 4px; gap: 8px;
+            flex-wrap: wrap; align-items: center;
+        }
+        #plot-toolbar .hint { color: #999; font-size: 0.8em; margin-left: 4px; }
     </style>
 </head>
 <body>
@@ -103,8 +118,23 @@
         <input type="number" id="legend_y" value="100" placeholder="e.g. 100">
     </div>
     <div class="form-group">
+        <label>Branch Label Font Size:</label>
+        <input type="number" id="branch_font_size" value="26" min="0" max="200" placeholder="e.g. 26">
+    </div>
+    <div class="form-group">
+        <label>Node Label Font Size:</label>
+        <input type="number" id="node_font_size" value="12" min="0" max="200" placeholder="e.g. 12">
+    </div>
+    <div class="form-group">
         <label>Remove Samples Text:</label>
         <input type="checkbox" id="remove_samples_text">
+    </div>
+
+    <div class="section-title">Load Saved Plot</div>
+    <div class="form-group">
+        <label>Load JSON Plot:</label>
+        <input type="file" id="load_json_input" accept=".json">
+        <button id="load_json_btn" class="btn btn-demo btn-sm">Load JSON</button>
     </div>
 
     <div class="form-group" style="margin-top: 20px;">
@@ -112,11 +142,25 @@
         <button id="demo_btn" class="btn btn-demo"    disabled>Load Demo Data</button>
     </div>
 
-    <div id="svg-container">
+    <!-- Plot toolbar: shown after a plot is loaded/generated -->
+    <div id="plot-toolbar">
+        <button onclick="downloadSVG()" class="btn btn-primary btn-sm">&#8595; SVG</button>
+        <button onclick="downloadPNG()" class="btn btn-primary btn-sm">&#8595; PNG</button>
+        <button onclick="savePlotJSON()" class="btn btn-primary btn-sm">&#128190; Save JSON</button>
+        <button onclick="resetView()" class="btn btn-demo btn-sm">&#8634; Reset View</button>
+        <span class="hint">Scroll to zoom &middot; Drag to pan</span>
+    </div>
+
+    <div id="svg-container" class="empty">
         <i>Output will appear here.</i>
     </div>
 
     <script>
+        // ── Globals ───────────────────────────────────────────────────────────
+        let currentSvgContent = '';
+        let viewState = { scale: 1, tx: 0, ty: 0 };
+        let dragState = { active: false, startX: 0, startY: 0, startTx: 0, startTy: 0 };
+
         // ── Status helper ─────────────────────────────────────────────────────
         function setStatus(msg, cls) {
             const el = document.getElementById('status');
@@ -177,6 +221,119 @@
             else if (msg.includes('Done.'))         { _finishProgress(); }
         };
 
+        // ── Plot display and view helpers ─────────────────────────────────────
+        function showPlot(svg) {
+            currentSvgContent = svg;
+            const container = document.getElementById('svg-container');
+            container.innerHTML = '';
+            container.classList.remove('empty');
+            container.style.cursor = 'grab';
+            const wrapper = document.createElement('div');
+            wrapper.id = 'svg-wrapper';
+            wrapper.style.display = 'inline-block';
+            wrapper.style.transformOrigin = '0 0';
+            wrapper.innerHTML = svg;
+            container.appendChild(wrapper);
+            viewState = { scale: 1, tx: 0, ty: 0 };
+            document.getElementById('plot-toolbar').style.display = 'flex';
+        }
+
+        function applyTransform() {
+            const wrapper = document.getElementById('svg-wrapper');
+            if (wrapper) {
+                wrapper.style.transform =
+                    `translate(${viewState.tx}px, ${viewState.ty}px) scale(${viewState.scale})`;
+            }
+        }
+
+        function resetView() {
+            viewState = { scale: 1, tx: 0, ty: 0 };
+            applyTransform();
+        }
+
+        // ── Download / Save helpers ───────────────────────────────────────────
+        function downloadSVG() {
+            if (!currentSvgContent) return;
+            const blob = new Blob([currentSvgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'annotated.svg'; a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function downloadPNG() {
+            const svgEl = document.querySelector('#svg-container svg');
+            if (!svgEl) return;
+            const data = new XMLSerializer().serializeToString(svgEl);
+            const svgBlob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+            const img = new Image();
+            img.onload = function() {
+                const w = parseInt(svgEl.getAttribute('width') || 800);
+                const h = parseInt(svgEl.getAttribute('height') || 600);
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, w, h);
+                ctx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+                const a = document.createElement('a');
+                a.download = 'annotated.png';
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            img.src = url;
+        }
+
+        function savePlotJSON() {
+            if (!currentSvgContent) return;
+            const plotData = { svg: currentSvgContent, savedAt: new Date().toISOString() };
+            const blob = new Blob([JSON.stringify(plotData, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = 'tree_plot.json'; a.click();
+        }
+
+        // ── Zoom / Pan ────────────────────────────────────────────────────────
+        const svgContainer = document.getElementById('svg-container');
+
+        svgContainer.addEventListener('wheel', (e) => {
+            if (!document.getElementById('svg-wrapper')) return;
+            e.preventDefault();
+            const delta = e.deltaY < 0 ? 1.1 : 0.9;
+            const rect = svgContainer.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            viewState.tx = mx + (viewState.tx - mx) * delta;
+            viewState.ty = my + (viewState.ty - my) * delta;
+            viewState.scale *= delta;
+            applyTransform();
+        }, { passive: false });
+
+        svgContainer.addEventListener('mousedown', (e) => {
+            if (!document.getElementById('svg-wrapper')) return;
+            if (e.button !== 0) return;
+            dragState = { active: true, startX: e.clientX, startY: e.clientY,
+                          startTx: viewState.tx, startTy: viewState.ty };
+            svgContainer.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!dragState.active) return;
+            viewState.tx = dragState.startTx + (e.clientX - dragState.startX);
+            viewState.ty = dragState.startTy + (e.clientY - dragState.startY);
+            applyTransform();
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!dragState.active) return;
+            dragState.active = false;
+            if (document.getElementById('svg-wrapper')) {
+                svgContainer.style.cursor = 'grab';
+            }
+        });
+
         // ── Demo data loader ──────────────────────────────────────────────────
         function _makeFile(content, name, type) {
             const blob = new Blob([content], { type });
@@ -221,6 +378,25 @@
             });
         }
 
+        // ── Load JSON plot ────────────────────────────────────────────────────
+        document.getElementById('load_json_btn').addEventListener('click', () => {
+            const fileInput = document.getElementById('load_json_input');
+            const file = fileInput.files[0];
+            if (!file) { alert('Please select a JSON file first.'); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const plotData = JSON.parse(e.target.result);
+                    if (!plotData.svg) throw new Error('No SVG data found in file.');
+                    showPlot(plotData.svg);
+                    setStatus('Plot loaded from JSON.', 'ready');
+                } catch (err) {
+                    alert('Failed to load JSON: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
         // ── Pyodide init ──────────────────────────────────────────────────────
         let pyodide;
 
@@ -259,7 +435,11 @@
             setStatus('Running pipeline…');
             document.getElementById('run_btn').disabled  = true;
             document.getElementById('demo_btn').disabled = true;
-            document.getElementById('svg-container').innerHTML = '<i>Running…</i>';
+            const container = document.getElementById('svg-container');
+            container.innerHTML = '<i style="padding:20px;">Running…</i>';
+            container.classList.add('empty');
+            container.style.cursor = 'default';
+            document.getElementById('plot-toolbar').style.display = 'none';
             _resetProgress();
 
             try {
@@ -273,7 +453,7 @@
                     setStatus('Ready!', 'ready');
                     document.getElementById('run_btn').disabled  = false;
                     document.getElementById('demo_btn').disabled = false;
-                    document.getElementById('svg-container').innerHTML = '<i>Output will appear here.</i>';
+                    container.innerHTML = '<i>Output will appear here.</i>';
                     document.getElementById('progress-section').style.display = 'none';
                     return;
                 }
@@ -312,6 +492,10 @@
                 if (legendX) { args.push('--legend_x', legendX); }
                 const legendY = document.getElementById('legend_y').value;
                 if (legendY) { args.push('--legend_y', legendY); }
+                const branchFontSize = document.getElementById('branch_font_size').value;
+                if (branchFontSize) { args.push('--branch_font_size', branchFontSize); }
+                const nodeFontSize = document.getElementById('node_font_size').value;
+                if (nodeFontSize)   { args.push('--node_font_size',   nodeFontSize);   }
                 if (document.getElementById('remove_samples_text').checked) {
                     args.push('--remove_samples_text');
                 }
@@ -343,29 +527,16 @@ finally:
 `);
 
                 const svgContent = pyodide.FS.readFile('/work/annotated.svg', { encoding: 'utf8' });
-                document.getElementById('svg-container').innerHTML = '';
-
-                const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-                const url  = URL.createObjectURL(blob);
-                const a    = document.createElement('a');
-                a.href = url; a.download = 'annotated.svg'; a.textContent = 'Download SVG';
-                Object.assign(a.style, {
-                    display: 'inline-block', marginBottom: '10px', padding: '5px 12px',
-                    background: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '3px'
-                });
-                document.getElementById('svg-container').appendChild(a);
-
-                const div = document.createElement('div');
-                div.innerHTML = svgContent;
-                document.getElementById('svg-container').appendChild(div);
-
+                showPlot(svgContent);
                 setStatus('Done!', 'ready');
 
             } catch (err) {
                 console.error(err);
                 setStatus('Error: ' + err.message, 'error');
-                document.getElementById('svg-container').innerHTML =
-                    '<i style="color:red;">Error occurred. Check the browser console for details.</i>';
+                container.innerHTML =
+                    '<i style="color:red; padding:20px;">Error occurred. Check the browser console for details.</i>';
+                container.classList.add('empty');
+                container.style.cursor = 'default';
                 document.getElementById('progress-section').style.display = 'none';
             }
 

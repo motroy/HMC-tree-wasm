@@ -194,7 +194,8 @@ def run_step2(arguments, output_file):
     if len(multi_sample_nodes) > 0:
         print(f"Adding multi-sample node labels ({len(multi_sample_nodes)} nodes)")
         svg_lines = add_multi_sample_nodes(svg_lines, multi_sample_nodes,
-                                           arguments['spacing_factor'])
+                                           arguments['spacing_factor'],
+                                           arguments.get('node_font_size', 12))
     else:
         print("No multi-sample nodes found.")
 
@@ -300,6 +301,8 @@ def main():
     p.add_argument('--spacing_factor', type=int)
     p.add_argument('--remove_samples_text', action='store_true')
     p.add_argument('--legend_text', action='store_true')
+    p.add_argument('--branch_font_size', type=int, default=26, help='branch label font size')
+    p.add_argument('--node_font_size', type=int, default=12, help='node label font size')
     p.add_argument('--iterations', type=int, default=600,
                    help="layout iterations for the initial SVG")
     p.add_argument('--render', choices=['png', 'pdf', 'both'],
@@ -324,7 +327,9 @@ def main():
     # --- Stage A: Newick -> GrapeTree JSON + SVG ---
     print("== Stage A: Newick -> base tree ==")
     _, _, members = n2g.generate(args.newick, base_json, base_svg,
-                                 layout_iterations=args.iterations)
+                                 layout_iterations=args.iterations,
+                                 branch_font_size=args.branch_font_size,
+                                 node_font_size=args.node_font_size)
     multi = {k: v for k, v in members.items() if len(v) > 1}
     print(f"  {len(members)} nodes ({len(multi)} multi-sample) laid out.")
 
@@ -393,6 +398,7 @@ def main():
                     else int(defaults.get('legend_x', 1100)),
         'legend_y': args.legend_y if args.legend_y is not None
                     else int(defaults.get('legend_y', 100)),
+        'node_font_size': args.node_font_size,
         'force': True,
     }
     run_step2(arguments, args.output)

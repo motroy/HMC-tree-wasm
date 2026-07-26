@@ -76,14 +76,15 @@ def find_translate_factor(index,spacing_factor,start_point):
 # <text class="node-group-number" dy=".71em" text-anchor="middle" font-size="12" font-family="sans-serif" transform="translate(0,-4)">J3472212
 # </text>
 # and adds after them the other samples, one up by spacing faactor, one down by spacing factor.
-def add_multi_sample_nodes(svg_lines,multi_sample_nodes,spacing_factor):
+def add_multi_sample_nodes(svg_lines,multi_sample_nodes,spacing_factor,node_font_size=12):
+    fs = str(node_font_size)
     for i in multi_sample_nodes.keys():
-        current_key_line = '<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="12" font-family="sans-serif" transform="translate(0,-4)">'+i
+        current_key_line = '<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="'+fs+'" font-family="sans-serif" transform="translate(0,-4)">'+i
         current_key_index = svg_lines.index(current_key_line)
         # If the total number of samples in the node is even (i.e. the number of samples in the dictionary value is odd), we'll rearrange the locations, splitting the total space using the spacing_factor.
         if len(multi_sample_nodes[i])%2==1:
             key_translate_factor = -4 - 0.5 * spacing_factor
-            svg_lines[current_key_index] = '<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="12" font-family="sans-serif" transform="translate(0,'+str(key_translate_factor)+')">'+i
+            svg_lines[current_key_index] = '<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="'+fs+'" font-family="sans-serif" transform="translate(0,'+str(key_translate_factor)+')">'+i
 
         # If the total number of samples in the node is odd (i.e. the list in the dictionary value is even), the locations are symmetrical around the (0,-4) location of the original key
         for index,j in enumerate(multi_sample_nodes[i]):
@@ -92,7 +93,7 @@ def add_multi_sample_nodes(svg_lines,multi_sample_nodes,spacing_factor):
                 translate_factor = find_translate_factor(index,spacing_factor,-4)
             else:
                 translate_factor = find_translate_factor(index, spacing_factor,-4 - 0.5 * spacing_factor)
-            svg_lines.insert(to_insert,'<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="12" font-family="sans-serif" transform="translate(0,'+str(translate_factor)+')">'+j)
+            svg_lines.insert(to_insert,'<text class="node-group-number" dy=".71em" text-anchor="middle" font-size="'+fs+'" font-family="sans-serif" transform="translate(0,'+str(translate_factor)+')">'+j)
             svg_lines.insert(to_insert+1,'</text>')
             to_insert+=2
     return svg_lines
