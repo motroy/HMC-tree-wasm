@@ -526,8 +526,8 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h,
         parts.append(f'<text class="distance-label" dy=".71em" '
                      f'text-anchor="middle" font-size="{branch_font_size}px" '
                      f'font-family="sans-serif" x="{mx}" y="{my}" '
-                     f'style="fill: black; stroke: white; '
-                     f'stroke-width: 5px; opacity: 0.9;">{int(d)}</text>')
+                     f'style="fill: black; stroke: white; stroke-width: 5px; '
+                     f'paint-order: stroke fill; opacity: 0.9;">{int(d)}</text>')
         parts.append('</g>')
 
     # nodes
