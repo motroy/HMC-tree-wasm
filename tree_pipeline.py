@@ -264,7 +264,8 @@ def run_step2(arguments, output_file):
         svg_lines = svg_lines[:legend_start] + legend_lines + svg_lines[scale_start:]
     svg_lines[0] = ('<svg xmlns="http://www.w3.org/2000/svg" width="'
                     + str(arguments['svg_width']) + '" height="'
-                    + str(arguments['svg_height']) + '" id="mst-svg">')
+                    + str(arguments['svg_height']) + '" id="mst-svg"'
+                    + ' style="background: white;">')
     print_svg_lines(svg_lines, output_file)
     print("Created", output_file)
 
@@ -303,6 +304,10 @@ def main():
     p.add_argument('--legend_text', action='store_true')
     p.add_argument('--branch_font_size', type=int, default=26, help='branch label font size')
     p.add_argument('--node_font_size', type=int, default=12, help='node label font size')
+    p.add_argument('--branch_stroke_width', type=float, default=3,
+                   help='branch line stroke width in px')
+    p.add_argument('--distance_scale', choices=['log', 'sqrt', 'linear'], default='log',
+                   help='branch-length scale for layout: log (default), sqrt, or linear')
     p.add_argument('--iterations', type=int, default=600,
                    help="layout iterations for the initial SVG")
     p.add_argument('--render', choices=['png', 'pdf', 'both'],
@@ -329,7 +334,9 @@ def main():
     _, _, members = n2g.generate(args.newick, base_json, base_svg,
                                  layout_iterations=args.iterations,
                                  branch_font_size=args.branch_font_size,
-                                 node_font_size=args.node_font_size)
+                                 node_font_size=args.node_font_size,
+                                 branch_stroke_width=args.branch_stroke_width,
+                                 distance_scale=args.distance_scale)
     multi = {k: v for k, v in members.items() if len(v) > 1}
     print(f"  {len(members)} nodes ({len(multi)} multi-sample) laid out.")
 

@@ -373,13 +373,19 @@ def _tree_bfs_layout(rep_nodes, collapsed_edges, k):
     return pos
 
 
-def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
+def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42,
+                  distance_scale='log'):
     '''
     Fruchterman-Reingold layout seeded from a BFS radial tree layout so the
     tree topology is already reflected in the starting positions. Attraction
-    forces are weighted by log(edge_distance+1) so longer branches produce
-    greater separation. Iterations are auto-capped for large trees to keep
-    O(n^2) repulsion time manageable.
+    forces are weighted by a scaled edge distance so longer branches produce
+    greater separation. distance_scale controls the mapping:
+      'log'    - log(d+1)           (default; compresses very long edges)
+      'sqrt'   - sqrt(d)            (middle ground; more spread than log)
+      'linear' - d                  (true proportional lengths; can be very wide)
+    All three are normalised to the same maximum ideal separation so the
+    overall tree size is comparable regardless of the chosen scale.
+    Iterations are auto-capped for large trees.
     '''
     import random
     rng = random.Random(seed)
@@ -387,6 +393,20 @@ def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
 
     area = (n * 80.0) ** 2
     k = math.sqrt(area / max(1, n))
+
+    # Precompute normalisation so all scales produce the same max ideal distance
+    all_d = [d for _, _, d in collapsed_edges if d > 0]
+    max_d = max(all_d) if all_d else 1.0
+    log_max = math.log1p(max_d)  # reference ceiling for normalisation
+
+    def _dscale(d):
+        if distance_scale == 'sqrt':
+            raw = math.sqrt(d) if d > 0 else 0.0
+            return raw / math.sqrt(max_d) * log_max if max_d > 0 else raw
+        elif distance_scale == 'linear':
+            return d / max_d * log_max if max_d > 0 else d
+        else:  # 'log' (default)
+            return math.log1p(d)
 
     # Topology-aware initial layout; much better than a circle for large trees
     pos = _tree_bfs_layout(rep_nodes, collapsed_edges, k)
@@ -421,12 +441,12 @@ def spring_layout(rep_nodes, collapsed_edges, iterations=600, seed=42):
                 ux, uy = dx / dist, dy / dist
                 disp[ri][0] += ux * force; disp[ri][1] += uy * force
                 disp[rj][0] -= ux * force; disp[rj][1] -= uy * force
-        # attraction along edges weighted by log(d+1)
+        # attraction along edges, ideal length driven by chosen distance scale
         for a, b, d in collapsed_edges:
             dx = pos[a][0] - pos[b][0]
             dy = pos[a][1] - pos[b][1]
             dist = math.hypot(dx, dy) or 0.01
-            ideal = k * (1 + math.log1p(d))
+            ideal = k * (1 + _dscale(d))
             force = dist * dist / ideal
             ux, uy = dx / dist, dy / dist
             disp[a][0] -= ux * force; disp[a][1] -= uy * force
@@ -506,13 +526,14 @@ def circle_path(r):
 
 
 def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h,
-              branch_font_size=26, node_font_size=12):
+              branch_font_size=26, node_font_size=12, branch_stroke_width=3):
     rep_list = list(members.keys())
     parts = []
     parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" '
-                 f'width="{int(canvas_w)}" height="{int(canvas_h)}" id="mst-svg">')
+                 f'width="{int(canvas_w)}" height="{int(canvas_h)}" id="mst-svg" '
+                 f'style="background: white;">')
     parts.append(f'<rect pointer-events="all" width="{int(canvas_w)}" '
-                 f'height="{int(canvas_h)}" style="fill: none;"></rect>')
+                 f'height="{int(canvas_h)}" style="fill: white;"></rect>')
     parts.append('<g id="vis" transform="translate(0,0) scale(1)">')
 
     # links first (drawn under nodes)
@@ -521,7 +542,7 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h,
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2
         parts.append(f'<g id="{a}-{b}" class="link mst-element">')
         parts.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-                     f'stroke-dasharray="" stroke-width="3px" '
+                     f'stroke-dasharray="" stroke-width="{branch_stroke_width}px" '
                      f'style="stroke: black; opacity: 1;"></line>')
         parts.append(f'<text class="distance-label" dy=".71em" '
                      f'text-anchor="middle" font-size="{branch_font_size}px" '
@@ -562,7 +583,8 @@ def build_svg(reps, members, collapsed_edges, pos, canvas_w, canvas_h,
 # ------------------------------- Driver ------------------------------------ #
 
 def generate(newick_file, out_json, out_svg, layout_iterations=600,
-             branch_font_size=26, node_font_size=12):
+             branch_font_size=26, node_font_size=12, branch_stroke_width=3,
+             distance_scale='log'):
     with open(newick_file) as f:
         newick_text = f.read()
     root = parse_newick(newick_text)
@@ -570,7 +592,8 @@ def generate(newick_file, out_json, out_svg, layout_iterations=600,
     reps, members, collapsed_edges = merge_zero_distance(names, edges)
 
     rep_list = list(members.keys())
-    pos = spring_layout(rep_list, collapsed_edges, iterations=layout_iterations)
+    pos = spring_layout(rep_list, collapsed_edges, iterations=layout_iterations,
+                        distance_scale=distance_scale)
     pos, w, h = normalize_positions(pos)
 
     data = build_json(root, reps, members, collapsed_edges, pos, newick_text)
@@ -582,7 +605,8 @@ def generate(newick_file, out_json, out_svg, layout_iterations=600,
 
     svg = build_svg(reps, members, collapsed_edges, pos, w, h,
                     branch_font_size=branch_font_size,
-                    node_font_size=node_font_size)
+                    node_font_size=node_font_size,
+                    branch_stroke_width=branch_stroke_width)
     with open(out_svg, 'w') as f:
         f.write(svg)
     return out_json, out_svg, members
